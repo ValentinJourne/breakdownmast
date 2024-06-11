@@ -120,6 +120,15 @@ summary(small.model.lm)
 pred = ggeffects::ggpredict(small.model.lm)
 plot(pred)
 
+small.model.lmmean =glmmTMB::glmmTMB(meanrolling~Year,
+                                 data = rollingtemperate %>% mutate(species = as_factor(Species))%>% #filter(Species == 'Fagus sylvatica') %>% 
+                                   filter(Year > 1980 & Species != ' Fagus sylvatica'))
+
+summary(small.model.lmmean)
+pred2 = ggeffects::ggpredict(small.model.lmmean)
+plot(pred2)
+
+
 plot(rollingtemperate$seednew, rollingtemperate$scale.seed)
 plot(rollingtemperate$cv.manual, rollingtemperate$cvroll)
 rollingtemperate %>% ggplot(aes(cvroll, meanrolling))+geom_point()
