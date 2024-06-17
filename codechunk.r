@@ -1,15 +1,37 @@
-#use libraries 
-library(mgcv)
-library(tidyverse)
+##### Rcode by Valentin and Maciej - we investigate masting breakdown based on data from MASTREE+ 
+# the project started in june 2024 and is shared in Val's GitHub
+
+########## the first step - loading libraries
+## here for finding the directory
+## tidyverse for manipulating data and cleaning code 
+## zoo for computing rolling windows
+## ggplot for plotting data
+## mgcv for running GAM models
 
 library(here)
-here('/Users/vjourne/Documents/GITprojects/')
+library(tidyverse)
+library(zoo)
+library(ggplot)
+library(mgcv)
+
+
+########## the second step - getting working directory and loading data from MASTREEplus (stored in github)
 
 here()
+#here('/Users/vjourne/Documents/GITprojects/')
+
 data = read_csv(here('MASTREEplus_2024-02-20_V2.csv'))
+
+## show the data and explore the variables
 str(data)
 table(data$Spatial_unit)
 table(data$Variable)
+
+########## the third step - writing a function to extract the data for coding = cleaning and filtering dataset
+## we filter the dataset using the records starting in second half of XX century (year = 1961) and measuring seed production for at least 14 years in one site
+## we create a new column which holds the unique name combined with:
+# Alpha_Number - an unique number of the study; Site_Number - an unique number of location; Species_code - species name; 
+# VariableFactor - type of seed data as factor; UnitFactor - 
 
 
 
@@ -25,6 +47,11 @@ determineSiteNew <- function(data = data , yearselection = 1961, filterobs = 14)
   
   return(dfupdate)
 }  
+
+
+## alternatively load the function saved in github 
+#source("determineSiteNew.R")
+
 
 savefilmastree = determineSiteNew(data = data %>% mutate(VariableFactor = as.character(as.numeric(as_factor(Variable))),
                                                          UnitFactor = as.character(as.numeric(as_factor(Unit))), 
