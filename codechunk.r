@@ -6,7 +6,7 @@ library(here)
 here('/Users/vjourne/Documents/GITprojects/')
 
 here()
-data = read_csv(here('/Users/vjourne/Library/CloudStorage/Dropbox/Mastree/MASTREEplus_2024-02-20_V2.csv'))
+data = read_csv(here('MASTREEplus_2024-02-20_V2.csv'))
 str(data)
 table(data$Spatial_unit)
 table(data$Variable)
