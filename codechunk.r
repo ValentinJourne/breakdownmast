@@ -60,15 +60,20 @@ savefilmastree = determineSiteNew(data = data %>% mutate(VariableFactor = as.cha
   mutate(hemisphere = ifelse(Latitude > 0, "North", "South")) %>% 
   mutate(TropNoTrops = ifelse(Latitude < -23.44 | Latitude > 23.44, "Non-Tropics", 'Tropics'))
 
+##########################
 #for Val extraction climate
 #convert to shp with WGS84
 site.mastree.forclim = savefilmastree %>% ungroup() %>% 
   dplyr::filter(TropNoTrops == "Non-Tropics") %>% 
-  dplyr::select(Longitude, Latitude) %>% distinct() %>% 
+  dplyr::select(sitenewname, Longitude, Latitude) %>% distinct() %>% 
   sf::st_as_sf( coords = c("Longitude", "Latitude"), crs = 4326)
-sf::st_write(site.mastree.forclim, "shp.forclimate/output_mastreesite_climatelist.shp")
-
+sf::st_write(site.mastree.forclim, 
+             dsn = "shp.forclimate/output_mastreesite_climatelist.shp",
+             append=FALSE,
+             driver = "ESRI Shapefile")
+#write_csv2(site.mastree.forclim, 'listname.csv')
 #plot(site.mastree.forclim)
+##########################
 
 ggplot(savefilmastree%>%
          filter(Species_code == 'FAGSYL' & Year > 1950), 
