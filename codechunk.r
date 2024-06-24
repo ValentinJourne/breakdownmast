@@ -58,13 +58,13 @@ savefilmastree = determineSiteNew(data = data %>% mutate(VariableFactor = as.cha
                                                          filterobs = 19))%>%
   filter(!Variable == "pollen" & !Spatial_unit == 'super-region' & VarType == "C") %>% 
   mutate(hemisphere = ifelse(Latitude > 0, "North", "South")) %>% 
-  mutate(TropNoTrops = ifelse(Latitude < -23.44 | Latitude > 23.44, "Non-Tropics", 'Tropics'))
+  mutate(TropNoTrops = ifelse(Latitude < -23.44 | Latitude > 23.44, "Non-Tropics", 'Tropics')) %>% 
+  dplyr::filter(TropNoTrops == "Non-Tropics")
 
 ##########################
 #for Val extraction climate
 #convert to shp with WGS84
 site.mastree.forclim = savefilmastree %>% ungroup() %>% 
-  dplyr::filter(TropNoTrops == "Non-Tropics") %>% 
   dplyr::select(sitenewname, Longitude, Latitude) %>% distinct() %>% 
   sf::st_as_sf( coords = c("Longitude", "Latitude"), crs = 4326)
 sf::st_write(site.mastree.forclim, 
