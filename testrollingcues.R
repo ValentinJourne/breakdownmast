@@ -512,6 +512,9 @@ data.moving.roll %>%
   ggplot(aes(x=days.reversed, y = pseudo.r.squared, group = days.reversed))+
   geom_bar( stat="identity" , alpha = .9)
 
+######################################################################################################################################################
+######################################################################################################################################################
+#Long function to identify the best window weather cues 
 #create a list for each of them 
 Results_CSP = data.moving.roll %>%
   group_by(site) %>%
@@ -652,12 +655,344 @@ for(i in 1:length(Results_CSP)){
   
 }
 
+#qs::qsave(output_fit_summary,
+#          here("output_fit_summary_windows_7days.qs"))
+
 output_fit_summary %>% 
   ggplot(aes(x = pseudo.R2,
              y = estimate,
              col = pvalue))+geom_point()
 
+output_fit_summary %>% 
+  ggplot(aes(x = window.open,
+             y = estimate,
+             col = pvalue))+geom_point()
+
 table(output_fit_summary$type.moving)
+summary(output_fit_summary$knots.number)
+
+formated.window = output_fit_summary %>% pivot_longer(c(window.open, window.close),
+                                    names_to = 'close.open',
+                                    values_to = 'days.reversed') %>% 
+  left_join(calendarFormat)
+
+
+#i just want to run small linear regression weather cues 
+#get average climate conditons 
+outyear.slope.averagetemperature = NULL
+outyear.slope.weathercues = NULL
+for(i in 1:length(Results_CSP)){
+  #i='6042_011_PINALB_4_22'
+  site.subset = savefilmastree %>% 
+    dplyr::filter(sitenewname == unique(Results_CSP[[i]]$site))%>% 
+    dplyr::select(Alpha_Number, Species, Longitude, Latitude, sitenewname, Year, Value) %>% 
+    dplyr::rename(site = sitenewname, 
+                  year = Year) %>% 
+    mutate(ScaledSeedProduction = (Value - min(Value, na.rm = T))/(max(Value)-min(Value, na.rm = T))) %>% 
+    mutate(ScaledSeedProductionBR = y.transf.betareg(ScaledSeedProduction)) %>% 
+    mutate(date = as.Date(paste0(year, '-10-01')),
+           logit.seed = car::logit(ScaledSeedProduction)) %>% #need to use the 0-1 data 
+    filter(year < 2020) %>% 
+    left_join(phylolist)
+  
+  #get the climate id
+  climate.yearly.average = read_csv(paste0(path.climate, 'TemperatureData_', unique(Results_CSP[[i]]$site), '.csv')) %>%
+    mutate(
+      temperature.degree = temperature - 273.15, #convert K to celsius 
+      day = day(date),
+      month = month(date),
+      year = year(date),
+      DOY = yday(date),
+      day.month =format(date,"%m-%d")
+    ) %>% 
+    group_by(site_id, year) %>% 
+    summarise(mean.temperature = mean(temperature.degree),
+              sd.temperature = sd(temperature.degree))
+  
+  #combinationsite.climate = site.subset %>% 
+  #  left_join(climate.yearly.average)
+  
+  
+  #i want simple model average climate change 
+  lm.climate.time = lm(mean.temperature~year, data = combinationsite.climate)
+  
+  ggplot(combinationsite.climate, aes(x = year, y = mean.temperature))+
+    geom_point()+geom_line()
+  #save temporary 
+  outyear.slope.temp = broom::tidy(lm.climate.time) %>% 
+    mutate(site = unique(Results_CSP[[i]]$site)) %>% 
+    dplyr::select(site, everything()) 
+  outyear.slope.averagetemperature = rbind(outyear.slope.averagetemperature, outyear.slope.temp)
+  
+  
+  #now I want the cue change 
+  climate = read_csv(paste0(path.climate, 'TemperatureData_', unique(Results_CSP[[i]]$site), '.csv')) %>%
+    mutate(
+      temperature.degree = temperature - 273.15, #convert K to celsius 
+      day = day(date),
+      month = month(date),
+      year = year(date),
+      DOY = yday(date),
+      day.month =format(date,"%m-%d")
+    )
+  
+  # Set lastdays and yearneed based on maturation length
+  if (maturation.length == 1) {
+    lastdays <- 730  # 365 + 365/2
+    yearneed <- 2
+  } else if (maturation.length == 2) {
+    lastdays <- 1095  # 365 + 365 + 365/2
+    yearneed <- 3
+  }
+  
+  
+  # Define the year period
+  yearperiod <- (min(climate$year) + yearneed):max(climate$year)
+  
+  # Apply the function across all years in yearperiod and combine results
+  #here the map dfr will basically do same as aplly by runing the function over all the time period we want 
+  rolling.temperature.data <- map_dfr(yearperiod, 
+                                      reformat.climate.backtothepast, 
+                                      climate = climate, 
+                                      yearneed = yearneed, 
+                                      refday = refday, 
+                                      lastdays = lastdays, 
+                                      rollwin = rollwin,
+                                      variablemoving = 'temperature.degree')
+  
+  #do the subset from output_fit_summary
+  window.open = output_fit_summary[output_fit_summary$site == unique(Results_CSP[[i]]$site),]$window.open
+  window.close = output_fit_summary[output_fit_summary$site == unique(Results_CSP[[i]]$site),]$window.close
+  
+  climate.windows.best = rolling.temperature.data %>% 
+    dplyr::filter(days.reversed>=window.open & days.reversed<=window.close) %>% 
+    group_by(site_id, year) %>% 
+    summarise(mean.temperature = mean(rolling_avg_tmean, na.rm = T),
+              sd.temperature = sd(rolling_avg_tmean, na.rm = T)) %>% 
+    ungroup() %>% 
+    right_join(site.subset)
+  
+  lm.weathercues.time = lm(mean.temperature~year, data = climate.windows.best)
+  outyear.slope.cues.temp = broom::tidy(lm.weathercues.time) %>% 
+    mutate(site = unique(Results_CSP[[i]]$site)) %>% 
+    dplyr::select(site, everything()) 
+  outyear.slope.weathercues = rbind(outyear.slope.weathercues, outyear.slope.cues.temp)
+  
+}
+
+num_days <- 365 * 2
+days = 1:num_days
+temperature <- 20 + 10 * sin(2 * pi * (days - 172) / 365) + 
+  10 * sin(2 * pi * (days - 537) / 365)#noise <- rnorm(num_days, mean = 0, sd = 2)
+#temperature <- temperature + noise
+climate_data <- data.frame(
+  day = days,
+  temperature = temperature
+)%>%
+  mutate(date = as.Date("1980-01-01") + days - 1)
+
+ggplot(climate_data, aes(y = temperature, x = date))+
+  geom_line()+
+  xlab('Day Of Year')+
+  ylab('Temperature')+
+  ggpubr::theme_pubr()
+
+fin = outyear.slope.weathercues %>% 
+  filter(term == 'year') %>% 
+  dplyr::select(site, estimate, std.error) %>% 
+  rename_with(.cols = -site,#everything(),
+              .fn = ~ paste0("cues_", .x, "")) %>% 
+  left_join(outyear.slope.averagetemperature %>% 
+              filter(term == 'year') %>% 
+              dplyr::select(site, estimate, std.error)%>% 
+              rename_with(.cols = -site,#everything(),
+                          .fn = ~ paste0("global_", .x, "")) ) %>% 
+  left_join(output_fit_summary) %>% 
+  left_join(savefilmastree %>% dplyr::select(Species, sitenewname) %>% distinct() %>% rename(site = sitenewname)) %>% 
+  left_join(phylolist)
+
+ggplot(fin, aes(x = abs(estimate),
+                y = (cues_estimate),
+                col = family))+geom_point()+
+  ylab('Climate change exposure')+
+  xlab('Cues reproduction sensitivity')
+
+ggplot(fin, aes(x = global_estimate,
+                y = (cues_estimate),
+                col = family))+geom_point()+
+  ylab('Climate change exposure')+
+  xlab('Cues reproduction sensitivity')
+
+
+
+#alternative with Sem
+#Combine this data with the reproductive data 
+dataend = NULL
+for(i in 1:length(Results_CSP)){
+  
+  site.subset = savefilmastree %>% 
+    dplyr::filter(sitenewname == unique(Results_CSP[[i]]$site))%>% 
+    dplyr::select(Alpha_Number, Species, Longitude, Latitude, sitenewname, Year, Value) %>% 
+    dplyr::rename(site = sitenewname, 
+                  year = Year) %>% 
+    mutate(ScaledSeedProduction = (Value - min(Value, na.rm = T))/(max(Value)-min(Value, na.rm = T))) %>% 
+    mutate(ScaledSeedProductionBR = y.transf.betareg(ScaledSeedProduction)) %>% 
+    mutate(date = as.Date(paste0(year, '-10-01')),
+           logit.seed = car::logit(ScaledSeedProduction)) %>% #need to use the 0-1 data 
+    filter(year < 2020) %>% 
+    left_join(phylolist)
+  
+  #get the climate id
+  climate.yearly.average = read_csv(paste0(path.climate, 'TemperatureData_', unique(Results_CSP[[i]]$site), '.csv')) %>%
+    mutate(
+      temperature.degree = temperature - 273.15, #convert K to celsius 
+      day = day(date),
+      month = month(date),
+      year = year(date),
+      DOY = yday(date),
+      day.month =format(date,"%m-%d")
+    ) %>% 
+    group_by(site_id, year) %>% 
+    summarise(mean.temperature = mean(temperature.degree),
+              sd.temperature = sd(temperature.degree))
+
+  
+  #now I want the cue change 
+  climate = read_csv(paste0(path.climate, 'TemperatureData_', unique(Results_CSP[[i]]$site), '.csv')) %>%
+    mutate(
+      temperature.degree = temperature - 273.15, #convert K to celsius 
+      day = day(date),
+      month = month(date),
+      year = year(date),
+      DOY = yday(date),
+      day.month =format(date,"%m-%d")
+    )
+  
+  # Set lastdays and yearneed based on maturation length
+  if (maturation.length == 1) {
+    lastdays <- 730  # 365 + 365/2
+    yearneed <- 2
+  } else if (maturation.length == 2) {
+    lastdays <- 1095  # 365 + 365 + 365/2
+    yearneed <- 3
+  }
+  
+  
+  # Define the year period
+  yearperiod <- (min(climate$year) + yearneed):max(climate$year)
+  
+  # Apply the function across all years in yearperiod and combine results
+  #here the map dfr will basically do same as aplly by runing the function over all the time period we want 
+  rolling.temperature.data <- map_dfr(yearperiod, 
+                                      reformat.climate.backtothepast, 
+                                      climate = climate, 
+                                      yearneed = yearneed, 
+                                      refday = refday, 
+                                      lastdays = lastdays, 
+                                      rollwin = rollwin,
+                                      variablemoving = 'temperature.degree')
+  
+  #do the subset from output_fit_summary
+  window.open = output_fit_summary[output_fit_summary$site == unique(Results_CSP[[i]]$site),]$window.open
+  window.close = output_fit_summary[output_fit_summary$site == unique(Results_CSP[[i]]$site),]$window.close
+  
+  climate.windows.best = rolling.temperature.data %>% 
+    dplyr::filter(days.reversed>=window.open & days.reversed<=window.close) %>% 
+    group_by(site_id, year) %>% 
+    summarise(mean.temperature.cues = mean(rolling_avg_tmean, na.rm = T),
+              sd.temperature.cues = sd(rolling_avg_tmean, na.rm = T)) %>% 
+    ungroup() %>% 
+    right_join(site.subset) %>% 
+    left_join(climate.yearly.average) %>% 
+    mutate(year = year-2020) %>% 
+    mutate(value = logit.seed,
+           climate = mean.temperature.cues)
+  
+  SEM_mod <- ' value ~ year + climate
+    climate ~ year
+    value ~ 1'
+  
+  dataset = output_fit_summary[output_fit_summary$site == unique(Results_CSP[[i]]$site),]
+   
+  set.seed(666)
+  fit <- lavaan::cfa(SEM_mod, data = climate.windows.best)
+  #Extract the estimated relationship between temp and laying date
+  #Extract the intercept for this relationship
+  dataset$SEM_int   <- fit@ParTable$est[4]
+  dataset$SEM_beta <- fit@ParTable$est[2]
+  #Extract the SE for this relationship
+  dataset$SEM_SE   <- fit@ParTable$se[2]
+  
+  #Add slope and SE of change over time
+  dataset$Yr_beta <- fit@ParTable$est[1]
+  dataset$Yr_SE   <- fit@ParTable$se[1]
+  
+  #Out of interest, we also want to extract the relationship between year and temp (i.e. how much has temperature changed over time in this window)
+  dataset$CC_beta  <- fit@ParTable$est[3]
+  dataset$CC_SE  <- fit@ParTable$se[3]
+
+  mod <- stats::lm(climate ~ year, data = climate.windows.best)
+  dataset$CC_allyrs_beta = summary(mod)$coefficient[2]
+  dataset$CC_allyrs_SE = summary(mod)$coefficient[4]
+  
+  rm(fit)
+  dataend = rbind(dataend, dataset)
+  
+}
+
+dataend.bis = dataend %>% 
+  mutate(SEM_beta_abs = abs(SEM_beta),
+         absCC_beta = abs(CC_beta),
+         CC_allyrs_beta_abs = abs(CC_allyrs_beta),
+         vulnerability = SEM_beta_abs * CC_allyrs_beta) %>% 
+  left_join(savefilmastree %>% dplyr::select(Species, sitenewname) %>% distinct() %>% rename(site = sitenewname)) %>% 
+  left_join(phylolist)
+
+
+sense_limits <- c(-2, 0, 2)
+sense_limits <- c(-2, 2)
+
+exp_limits <- c(-.4, 0, 0.4)
+exp_limits <- c(-.4, 0.4)
+
+vulnerability_landscape <- expand.grid(sense = seq(sense_limits[1], sense_limits[2], length = 500),
+                                       exp = seq(exp_limits[1], exp_limits[2], length = 500)) %>% 
+  dplyr::mutate(vulnerability = sense * exp) %>% 
+  dplyr::mutate(vuln_fct = cut(vulnerability, breaks = seq(min(vulnerability), max(vulnerability), length.out = 15))) %>% 
+  dplyr::rowwise() %>% 
+  dplyr::mutate(value = gsub(pattern = "\\(|\\]", replacement = "", vuln_fct) %>% stringr::str_split(pattern = ",") %>% `[[`(1) %>% as.numeric() %>% mean()) %>% 
+  dplyr::filter(!is.na(vuln_fct))
+
+colmin <- RColorBrewer::brewer.pal(n = 9, name = "Reds")[2]
+colmax <- RColorBrewer::brewer.pal(n = 9, name = "Reds")[9]
+palette_blues <- colorRampPalette(colors = c("white", "#08519C"))(6)
+coloursn = palette_blues
+"#FEE0D2"
+"#67000D"
+
+dataend.bis  %>% 
+  left_join(rollingtemperate %>% 
+              group_by(sitenewname, Species, Collection_method, Variable, Latitude, Longitude)%>% 
+              summarise(meanroling10year = mean(cvroll, na.rm = T)) %>% 
+              dplyr::select(sitenewname, meanroling10year) %>% 
+              rename(site = sitenewname)) %>% 
+  ggplot()+
+  geom_tile(data = vulnerability_landscape, aes(x = sense, y = exp, fill = value),
+            colour = NA, alpha = .98) +
+  scale_fill_gradient2(low="#67000D", mid = 'white', high = "#67000D", midpoint = 0)+
+  #theme_void()
+  #geom_errorbar(aes(x = SEM_beta_abs, ymin = CC_allyrs_beta - CC_allyrs_SE, ymax = CC_allyrs_beta + CC_allyrs_SE),
+  #              width = 0)+
+  #geom_errorbarh(aes(y = CC_allyrs_beta, xmin = SEM_beta_abs - SEM_SE, xmax = SEM_beta_abs + SEM_SE),
+  #               height = 0)+
+  ggnewscale::new_scale_fill()+
+  geom_point(aes(x = SEM_beta, y = CC_allyrs_beta, size = meanroling10year), 
+             shape = 21, alpha = .86)+
+  xlab('Seed production sensitivity')+
+  ylab('Temperature change exposure')+
+  ggpubr::theme_pubclean()+
+  theme(legend.position = 'right')
+
 
 #ok now try with clinmwin 
 #detachAllPackages()
